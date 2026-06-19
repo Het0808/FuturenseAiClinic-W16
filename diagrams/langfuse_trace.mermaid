@@ -1,0 +1,14 @@
+graph TD
+    Trace[Trace: User Query Session]
+    Trace --> Span1[Span 1: Input Guardrail Check]
+    Trace --> Span2[Span 2: Context Retrieval]
+    
+    Span2 --> SubSpan1[Sub-Span 2.1: Query Expansion LLM Call]
+    Span2 --> SubSpan2[Sub-Span 2.2: Vector Store Query]
+    Span2 --> SubSpan3[Sub-Span 2.3: BM25 Sparse Store Query]
+    Span2 --> SubSpan4[Sub-Span 2.4: Cross-Encoder Reranking]
+    
+    Trace --> Span3[Span 3: LLM Generation Run]
+    Trace --> Span4[Span 4: Output Guardrail Verification]
+    
+    Span1 & Span2 & Span3 & Span4 -.-> Aggregate[Langfuse Metrics: Tokens, Cost, Latency, Feedback]

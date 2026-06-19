@@ -1,0 +1,15 @@
+graph TD
+    Query[User Query] --> Expansion[Query Expansion / Multi-Query Generation]
+    Expansion --> Q1[Query Variation 1]
+    Expansion --> Q2[Query Variation 2]
+    Expansion --> Q3[Query Variation 3]
+    
+    Q1 & Q2 & Q3 --> Dense[Dense Vector Search / Cosine Similarity]
+    Q1 & Q2 & Q3 --> Sparse[Sparse Search / BM25 Index]
+    
+    Dense --> ReciprocalRank[Reciprocal Rank Fusion / RRF]
+    Sparse --> ReciprocalRank
+    
+    ReciprocalRank --> Metadata[Metadata Filtering]
+    Metadata --> Rerank[Cross-Encoder Reranker / Cohere or local MS-MARCO]
+    Rerank --> TopK[Top K Documents]

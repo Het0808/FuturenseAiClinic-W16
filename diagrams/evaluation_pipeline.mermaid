@@ -1,0 +1,18 @@
+graph TD
+    GoldenSet[(Golden Evaluation Dataset / eval/test_dataset.json)] --> Run[Run Evaluation Script / eval/run_eval.py]
+    Run --> Query[Query]
+    Run --> GroundTruth[Ground Truth Answer]
+    
+    Query --> SystemUnderTest[RAG System under test]
+    SystemUnderTest --> Generated[Generated Answer]
+    SystemUnderTest --> Context[Retrieved Contexts]
+    
+    Generated & Context & GroundTruth --> Evaluator[Ragas Evaluator Engine]
+    
+    subgraph Metrics [Ragas & Custom Metrics]
+        Evaluator --> F[Faithfulness Metric]
+        Evaluator --> AR[Answer Relevance Metric]
+        Evaluator --> CR[Context Recall Metric]
+    end
+    
+    F & AR & CR --> Report[Aggregate Results & Save to FINDINGS.md]

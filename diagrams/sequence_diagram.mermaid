@@ -1,0 +1,34 @@
+sequenceDiagram
+    autonumber
+    actor User
+    participant UI as Streamlit UI
+    participant Agent as Agent Orchestrator
+    participant Guard as Guardrails
+    participant Ret as Advanced Retriever
+    participant DB as Vector Database
+    participant LLM as LLM Provider
+    participant LF as Langfuse Tracing
+
+    User->>UI: Enter query "How to apply..."
+    UI->>Agent: execute_query(query)
+    Note over Agent: Start Langfuse Trace
+    Agent->>LF: Start root span (Session ID)
+    
+    Agent->>Guard: validate_input(query)
+    Guard-->>Agent: Output: Safe
+    
+    Agent->>Ret: retrieve_context(query)
+    Ret->>DB: hybrid_search(query)
+    DB-->>Ret: returns vector & lexical results
+    Ret->>Ret: rerank_results(results)
+    Ret-->>Agent: return Top-K chunks + metadata
+    
+    Agent->>LLM: generate_response(prompt, context)
+    LLM-->>Agent: returns raw response
+    
+    Agent->>Guard: validate_faithfulness(response, context)
+    Guard-->>Agent: output: Validated response
+    
+    Agent->>LF: End root span (logs tokens, cost, latency)
+    Agent-->>UI: return formatted response & sources
+    UI->>User: Display response with clickable source cards

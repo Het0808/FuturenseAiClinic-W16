@@ -1,0 +1,25 @@
+flowchart LR
+    subgraph Ingestion Pipeline
+        RawDocs[Raw Docs] --> Chunk[Semantic Chunking]
+        Chunk --> Embed[Embedding Model]
+        Embed --> Index[Vector Database Index]
+    end
+    
+    subgraph Query Execution Pipeline
+        Query[User Query] --> Parse[Query Rewriting & Key-phrase Extraction]
+        Parse --> DenseSearch[Dense Vector Search]
+        Parse --> SparseSearch[Sparse BM25 Search]
+        
+        Index -.-> DenseSearch
+        RawDocs -.-> SparseSearch
+        
+        DenseSearch --> Merge[Hybrid Fusion & RRF]
+        SparseSearch --> Merge
+        Merge --> Rerank[Cross-Encoder Reranker]
+        Rerank --> Context[Structured Context Block]
+        
+        Context --> Prompt[Prompt Template]
+        Query --> Prompt
+        Prompt --> Gen[LLM Generation]
+        Gen --> Out[Final Response]
+    end

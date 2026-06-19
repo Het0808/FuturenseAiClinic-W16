@@ -1,0 +1,26 @@
+graph TD
+    User([User Client]) <--> UI[Streamlit Frontend]
+    UI <--> Orchestrator[Agent Orchestrator / app.core.agent]
+    
+    subgraph Guardrails [Guardrail Layer]
+        InputGuard[Input Guardrail / Query Classifier]
+        OutputGuard[Output Guardrail / Hallucination Check]
+    end
+    
+    Orchestrator --> InputGuard
+    InputGuard --> |Safe Query| Retriever[Advanced Retriever / app.core.retriever]
+    
+    subgraph Storage [Knowledge Store]
+        VDB[(Vector Database)]
+        DocStore[(Document Store)]
+    end
+    
+    Retriever <--> |Dense Search| VDB
+    Retriever <--> |Lexical Search| DocStore
+    
+    Retriever --> |Raw Chunks| Reranker[Cross-Encoder Reranker]
+    Reranker --> |Top K Chunks| LLM[LLM Generator]
+    LLM --> OutputGuard
+    OutputGuard --> |Validated Output| Orchestrator
+    
+    Orchestrator -.-> |Async Traces| Langfuse{Langfuse Observability}
