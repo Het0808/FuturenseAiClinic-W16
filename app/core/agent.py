@@ -2,6 +2,7 @@ from openai import OpenAI
 from app.core.config import Config
 from app.core.retriever import RAGRetriever
 from app.core.prompts import RAG_SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
+from observability.langfuse_client import observe, langfuse_context
 
 class RAGAgent:
     """
@@ -42,10 +43,16 @@ class RAGAgent:
             
         return "\n\n".join(formatted_blocks)
 
+    @observe(name="rag-agent-run")
     def answer_query(self, query: str) -> dict:
         """
         Receives query, runs retrieval, structures prompt, calls LLM, and outputs result + sources.
         """
+        # Inject metadata tagging to the current trace transaction
+        langfuse_context.update_current_trace(
+            user_id="futurense-student-admin",
+            tags=["week16-evaluable-core"]
+        )
         # 1. Retrieve the top K matching document segments
         matches = self.retriever.retrieve(query, k=Config.RETRIEVAL_K)
         

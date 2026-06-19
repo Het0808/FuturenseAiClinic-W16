@@ -3,6 +3,7 @@ from pathlib import Path
 from openai import OpenAI
 import chromadb
 from app.core.config import Config
+from observability.langfuse_client import observe, langfuse_context
 
 class RAGRetriever:
     """
@@ -196,6 +197,7 @@ class RAGRetriever:
         )
         print("Ingestion completed successfully.")
 
+    @observe(name="retriever-lookup")
     def retrieve(self, query: str, k: int = None) -> list[dict]:
         """
         Converts query to vector space, queries ChromaDB, and returns structured result blocks.
