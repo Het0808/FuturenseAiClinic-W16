@@ -1,90 +1,199 @@
-# Futurense AI Clinic Mini Project (Evaluable Core)
+# AI Admission Copilot — Evaluable Core (Week 16)
 
-Welcome to the Week 16 Mini Project repository. This project is structured following enterprise ML and software engineering best practices, dividing concerns between core application code, evaluation pipelines, experimental spikes, design diagrams, product requirements, and observability configurations.
+A thin but **measurable** RAG slice for the AI Admission Copilot. It ingests
+university admission-policy documents, retrieves the relevant context, and
+answers with citations — and it ships with an evaluation + observability harness
+so answer quality is a **number on a scorecard**, not a vibe.
+
+This builds directly on the [Week 15 retrieval de-risk spike](https://github.com/Het0808/FuturenseAiClinic-W15):
+the architecture I drew there is now a traced pipeline, and the KPI targets I set
+there are the bar every metric is judged against.
+
+> **Status / honesty note.** The code, corpus, and golden set are complete and
+> real. The scorecard, Langfuse screenshots, experiment deltas, the LLM-diagnosis
+> writeup, and the reflections are produced by **running the harness with your own
+> API key** — they are intentionally *not* faked. Run `./run.sh` and the numbers
+> are yours to defend in the viva. Sections awaiting that run are marked
+> _(fill after run)_.
 
 ---
 
-## Repository Structure
+## Architecture
 
-```text
-.
-├── README.md                  # This file: master index and developer onboarding guide
-├── EXEC_MEMO.md               # Executive Summary and High-Level Architecture Memo
-├── FINDINGS.md               # R&D discoveries, evaluation analysis, and optimization logs
-├── app/                       # Production application source code
-│   ├── core/                  # Core logic, agent engines, config, and retrieval mechanisms
-│   ├── ui/                    # User interface components and page layouts
-│   └── utils/                 # Structured loggers, helper scripts, and validation utilities
-├── eval/                      # Evaluation suite (Ragas/DeepEval, test dataset, metrics)
-├── experiments/               # Experimental spikes (chunking analysis, retrieval tests, tuning)
-├── observability/             # Monitoring config, trace setups (Langfuse/OpenTelemetry)
-├── prd/                       # Product Requirements Document and success metrics
-├── design/                    # Detailed system design, decision records, and flow mappings
-└── diagrams/                  # Mermaid diagram source files (.mermaid / .md)
+```mermaid
+flowchart TD
+    subgraph Ingestion
+        D[docs/ .md policies] --> L[Loader]
+        L --> S[RecursiveCharacterTextSplitter<br/>size 1000 / overlap 200]
+        S --> E[OpenAI text-embedding-3-small]
+        E --> C[(Chroma)]
+    end
+    subgraph "Query (traced by Langfuse @observe)"
+        Q[User question] --> R[retrieve top-k]
+        C --> R
+        R --> P[assemble grounded prompt]
+        P --> G[LLM answer + citations / abstain]
+    end
+    subgraph "Evaluation harness"
+        GS[golden_set.jsonl<br/>40 Q&A · 4 flavors] --> RUN[run_ragas]
+        G --> RUN
+        RUN --> SC[scorecard.md<br/>faithfulness · relevancy · precision · recall]
+        RUN --> GATE[DeepEval pytest gate]
+    end
 ```
 
----
+## Repository structure
 
-## Folder Details: Purpose, Files, Responsibilities & Dependencies
+```text
+app/            RAG slice: ingest, retriever, generator, pipeline (@observe), cli
+eval/           golden_set.jsonl, run_ragas.py (scorecard), targets, DeepEval gate
+experiments/    run_experiments.py — change one knob, re-measure, report deltas
+observability/  Langfuse setup + screenshots/
+docs/           17 hand-authored admission-policy documents (the corpus)
+llm_task/       DIAGNOSIS.md — the worst-case LLM diagnosis pass/fail gate
+run.sh          one command to reproduce the scorecard
+EXEC_MEMO.md    one-page interview-ready memo
+```
 
-### 1. `/app`
-* **Purpose:** Contains all production-ready logic, APIs, UI layers, and utility helpers for running the application.
-* **Files Inside:**
-  * `app/core/config.py` — Application configuration management.
-  * `app/core/retriever.py` — Advanced RAG retrieval engine (hybrid search, re-ranking).
-  * `app/core/agent.py` — Orchestrator and validation state-machine.
-  * `app/core/prompts.py` — Strict prompt templates and guardrails.
-  * `app/ui/main.py` — Main Streamlit/Chainlit entry point.
-  * `app/ui/components.py` — Reusable front-end widgets.
-  * `app/utils/logger.py` — Standardized structural logger.
-* **Responsibilities:** Running the main user interface, executing queries, retrieving database context, routing intents, and generating outputs.
-* **Dependencies:** `streamlit`/`chainlit`, `langchain`/`llamaindex`, `chromadb`/`qdrant`/`pgvector`, `pydantic`.
+## Setup
 
-### 2. `/eval`
-* **Purpose:** Automated evaluation framework for quantifying retrieval and generation performance.
-* **Files Inside:**
-  * `eval/test_dataset.json` — Ground-truth Q&A reference evaluation dataset.
-  * `eval/run_eval.py` — Orchestrator script to execute runs across the dataset.
-  * `eval/metrics.py` — Implementation of RAGAS metrics (Faithfulness, Answer Relevance, Context Recall) and custom LLM-as-a-judge rubrics.
-* **Responsibilities:** Measuring regression in retriever/generator updates, outputting JSON performance summaries, and reporting core metrics.
-* **Dependencies:** `ragas`, `deeveval`, `pandas`, `matplotlib` (for reporting), `/app` (imports core configuration and retriever modules).
+```bash
+cd FuturenseAiClinic-W16
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env        # then add OPENAI_API_KEY
+```
 
-### 3. `/experiments`
-* **Purpose:** Isolation folder for R&D spikes, prototyping chunking strategies, testing embeddings, and running hyperparameter optimization without cluttering the production `/app` path.
-* **Files Inside:**
-  * `experiments/chunking_analysis.ipynb` — Interactive comparisons of semantic, recursive, and hierarchical chunking.
-  * `experiments/retrieval_spike.py` — Quick performance benchmarks of embedding sizes and vector index searches.
-* **Responsibilities:** Fast feedback loops for design options, testing hypothesis, and producing metrics documented in `FINDINGS.md`.
-* **Dependencies:** `/app` (selectively), `jupyter`, `numpy`, `scikit-learn`.
+Embeddings use OpenAI `text-embedding-3-small` (per spec). Generation defaults to
+`gpt-4o-mini`; set `GENERATION_PROVIDER=anthropic` in `.env` to use Claude instead.
+Langfuse keys are optional — without them, tracing is a no-op and everything else
+still runs.
 
-### 4. `/observability`
-* **Purpose:** System logging, performance tracing, cost monitoring, and audit trails.
-* **Files Inside:**
-  * `observability/langfuse_client.py` — Langfuse client initializer and prompt caching wrapper.
-  * `observability/logger.py` — Core logging setup for tracing intermediate outputs.
-* **Responsibilities:** Instrumenting LLM calls with tracing tokens, tracking step execution latency, capturing input/output contexts, and reporting cost/token statistics.
-* **Dependencies:** `langfuse`, `opentelemetry-api`.
+## Run it (one command)
 
-### 5. `/prd`
-* **Purpose:** High-level product alignment detailing *why* we are building the application, what problem it solves, and defining the bounds of success.
-* **Files Inside:**
-  * `prd/PRD.md` — Product Requirements Document (Functional & Non-Functional requirements, success metrics, KPIs, and risk mitigation).
-* **Responsibilities:** Keeping technical implementation aligned with business goals.
-* **Dependencies:** None.
+```bash
+./run.sh                # build index + evaluate 40 golden questions -> eval/scorecard.md
+# or step by step:
+python -m app.ingest                       # build the Chroma index
+python -m app.cli "How long can I defer?"  # ask one question (traced)
+python -m eval.run_ragas                   # full scorecard
+python -m experiments.run_experiments      # metric deltas
+pytest eval/test_faithfulness_gate.py -v   # Tier A CI gate
+```
 
-### 6. `/design`
-* **Purpose:** Detailed architectural design specifications, system design decisions, trade-offs, and architecture decision records (ADRs).
-* **Files Inside:**
-  * `design/architecture.md` — System components detailed write-up.
-  * `design/adr_001_retriever_design.md` — Architectural Decision Record for advanced retrieval options.
-* **Responsibilities:** Providing technical blueprints and reasoning for design paths chosen.
-* **Dependencies:** None.
+## What "done" looks like — reproduce the scorecard
 
-### 7. `/diagrams`
-* **Purpose:** Graphic representation of workflows, pipelines, and structures.
-* **Files Inside:**
-  * `diagrams/system_flow.mermaid` — End-to-end flowchart.
-  * `diagrams/retrieval_pipeline.mermaid` — Detailed ingestion and retrieval logic.
-  * `diagrams/evaluation_pipeline.mermaid` — Validation and metric loop.
-* **Responsibilities:** Visualizing architecture in standard formats (primarily Mermaid MD syntax).
-* **Dependencies:** None.
+`python -m eval.run_ragas` runs the pipeline over the golden set and writes
+[`eval/scorecard.md`](eval/scorecard.md): each metric, your score, the Week 15
+target, and pass/fail. Per-question evidence lands in `eval/results_raw.jsonl`.
+
+### The four core metrics (what each one asks)
+
+| Metric | The question it answers | Ship target |
+| :--- | :--- | :---: |
+| **Faithfulness** | Does every claim trace back to retrieved context (no hallucination)? | ≥ 0.90 (≥ 0.70 floor) |
+| **Answer relevancy** | Does the answer actually address the question? | ≥ 0.80 |
+| **Context precision** | Are the retrieved chunks relevant, and well-ordered? | ≥ 0.70 |
+| **Context recall** | Does the retrieved context contain the answer? | ≥ 0.80 |
+
+Plus operational KPIs carried from the Week 15 PRD: **retrieval hit-rate @ k=3**
+(≥ 0.95), **abstention accuracy** on out-of-corpus questions (≥ 0.90), **citation
+accuracy** (≥ 0.90), **avg latency** (< 1.5s), **avg cost/query** (< $0.005).
+Every target's provenance is recorded in [`eval/targets.py`](eval/targets.py).
+
+### Baseline scorecard _(fill after run)_
+
+> Paste the table from `eval/scorecard.md` here after running. Placeholder:
+
+| Metric | Score | Target (Week 15) | Pass/Fail |
+| :--- | :---: | :---: | :---: |
+| faithfulness | _ | ≥ 0.90 | _ |
+| answer_relevancy | _ | ≥ 0.80 | _ |
+| context_precision | _ | ≥ 0.70 | _ |
+| context_recall | _ | ≥ 0.80 | _ |
+| retrieval_hit_rate | _ | ≥ 0.95 | _ |
+| abstention_accuracy | _ | ≥ 0.90 | _ |
+| citation_accuracy | _ | ≥ 0.90 | _ |
+| avg_latency_s | _ | < 1.5s | _ |
+| avg_cost_usd | _ | < $0.005 | _ |
+
+## Golden eval set
+
+40 hand-authored, corpus-verified Q&A pairs in
+[`eval/golden_set.jsonl`](eval/golden_set.jsonl), across the four required flavors:
+
+- **easy** (12) — single-document fact lookup.
+- **ambiguous** (8) — vocabulary overlap that tempts the wrong document (the exact
+  failure mode the Week 15 spike found, e.g. "fee waiver" vs. "financial aid",
+  "defer enrollment" vs. "defer payment").
+- **multi-hop** (11) — needs two documents (e.g. homeschooled *and* international
+  testing requirements).
+- **adversarial** (10) — answer is **not** in the corpus; the system must abstain
+  with the fixed sentinel "I don't know based on the provided admission policies."
+
+The committed set is hand-authored. [`eval/generate_golden.py`](eval/generate_golden.py)
+shows the Ragas synthetic path for expanding it — outputs are marked `UNVERIFIED`
+and must be hand-checked before merging (raw synthetic data fails).
+
+## Experiments _(fill after run)_
+
+[`experiments/run_experiments.py`](experiments/run_experiments.py) changes one
+variable at a time and re-measures on the same golden set:
+
+1. **top-k**: 3 → 5
+2. **chunk size**: 1000/200 → 500/100 (rebuilds the index)
+
+Results and the keep/revert decision land in
+[`experiments/RESULTS.md`](experiments/RESULTS.md).
+
+## Observability (Langfuse)
+
+The pipeline is wrapped with `@observe()`; each run logs a trace with retrieval +
+generation spans, tokens, latency, and cost. Setup and screenshot instructions:
+[`observability/README.md`](observability/README.md).
+
+- Trace screenshot — `observability/screenshots/trace.png` _(add after run)_
+- Dashboard screenshot — `observability/screenshots/dashboard.png` _(add after run)_
+
+## Tier coverage
+
+- **Tier C (core):** working slice · 40-row golden set · Ragas baseline on the four
+  metrics · live Langfuse tracing · experiments with measured deltas. ✅ (code complete)
+- **Tier B (stretch):** adversarial/abstention handling + **abstention accuracy**
+  metric · **citation accuracy** check · error-analysis of worst cases (see
+  `llm_task/DIAGNOSIS.md` + the worst rows in `results_raw.jsonl`). ✅ (code complete)
+- **Tier A (advanced):** DeepEval pytest gate on a faithfulness floor
+  ([`eval/test_faithfulness_gate.py`](eval/test_faithfulness_gate.py)) · latency &
+  cost-per-query in the scorecard · before-production note in `EXEC_MEMO.md`. ✅ (code complete)
+
+## LLM-integrated task (pass/fail gate)
+
+Take the worst-scoring question, have an LLM diagnose it, **try the fix, and
+re-measure**. Template + gate rules: [`llm_task/DIAGNOSIS.md`](llm_task/DIAGNOSIS.md).
+_(fill after run)_
+
+## Reflection _(answer after run, 3–5 sentences each)_
+
+1. **Where did the system fail most — retrieval or generation? How do the metrics
+   tell you which?** _Hint: low `context_recall`/`context_precision` ⇒ retrieval;
+   high recall but low `faithfulness` ⇒ generation._
+2. **Did any metric look good while the answer was actually bad? What does that
+   teach you about single-metric thinking?**
+3. **Which Week 15 target did you hit, miss, or revise after seeing real numbers?**
+   _(Week 15 projected 80% hit-rate from a mock run and a ≥95% target.)_
+
+## KPI cheat-sheet (for the viva)
+
+- **Hit-rate @ k=3** = fraction of answerable questions where an expected source
+  appears in the top-3 retrieved chunks. Pure retrieval signal.
+- **Faithfulness** (Ragas) = of the claims in the answer, the fraction supported by
+  retrieved context. Low ⇒ hallucination.
+- **Answer relevancy** (Ragas) = how well the answer addresses the question
+  (LLM generates candidate questions from the answer, compares to the original).
+- **Context precision** (Ragas) = are the retrieved chunks relevant and ranked well.
+- **Context recall** (Ragas) = does the retrieved context contain everything the
+  reference answer needs. Low ⇒ retrieval missed something.
+- **Abstention accuracy** = of the 10 out-of-corpus questions, the fraction the
+  system correctly refused to answer.
+- **Citation accuracy** = of cited filenames, the fraction that were actually in
+  the retrieved context (not invented).
