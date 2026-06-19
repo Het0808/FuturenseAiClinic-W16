@@ -57,3 +57,63 @@ Includes chain-of-thought instructions, XML-structured tags for intermediate rea
 | 2026-06-19 | `v0.3.0-rerank-opt` | **0.94** | **0.92** | **0.91** | **1.8s** | **Pass (Production Ready)** |
 
 * **Key Takeaway:** The transition from Naive RAG to Hybrid + Reranking + Prompt Iteration 3 yielded a **+26%** bump in Faithfulness and a **-1.7s** reduction in end-to-end user latency (due to shorter context payloads in generation).
+
+---
+
+## 5. RAG Telemetry & Failure Mode Diagnostics
+
+As part of the continuous evaluation cycle, we isolated the lowest-scoring test query in the RAG pipeline to diagnose, classify, and mitigate its failure mode.
+
+### A. Failure Mode Profile
+* **Test Case ID:** `TC-017` (Multi-hop Category)
+* **User Question:** *"If a student is admitted to the part-time track and receives the Merit Scholarship, what is their final net tuition fee?"*
+
+#### Baseline Telemetry Data (Before Fix):
+* **Retrieved Context:**
+  * **Chunk 1 (From `admission_policy.txt`):** *"...The Merit Scholarship is awarded to top applicants and covers 25% of tuition fees. Registration fees are excluded from this discount."*
+  * *(Missing: Chunks from `course_catalog.txt` containing the tuition price for the Part-Time Track).*
+* **Generated Answer:** *"The Merit Scholarship covers 25% of the tuition fee. However, the exact final net tuition fee cannot be determined because the tuition fee for the part-time track is not provided in the context."*
+* **Ground Truth:** *"The tuition fee for the Part-Time Track is $6,000. The Merit Scholarship covers 25% of tuition, which is a discount of $1,500. Therefore, the final net tuition fee is $4,500."*
+
+#### Ragas Metrics (Before Fix):
+* **Faithfulness:** 1.0 (The model correctly declined to guess, avoiding hallucination).
+* **Answer Relevancy:** 0.32 (The user's core intent—receiving the calculated final price—was not met).
+* **Context Recall:** 0.50 (Only half of the necessary information chunks were retrieved).
+* **Context Precision:** 0.50 (Missing the second key page).
+
+---
+
+### B. Failure Diagnosis & Root Cause Analysis
+1. **Failure Classification:** **Retrieval Failure (Multi-hop Join Drop)**.
+2. **Root Cause Analysis:**
+   * The retriever was set to `k=2` and relied exclusively on **Dense Cosine Vector Search**.
+   * The query vector for *"part-time track Merit Scholarship net fee"* matched strongly with the scholarship policy documents, but failed to score high semantic similarity with the pricing lists in the catalog.
+   * Because the tuition price ($6,000) was in a separate document (`course_catalog.txt`), dense search alone dropped the second hop entirely.
+
+---
+
+### C. Mitigation & Engineering Fixes
+We deployed three concurrent adjustments to resolve this failure:
+1. **Hybrid Retrieval Activation:** Merged dense vector lookup with a sparse **BM25 keyword index**. The term *"part-time"* triggered a high BM25 keyword score on the catalog file, pulling it into the candidate matches.
+2. **Top-K Window Sweep:** Increased retriever retrieval bounds from `K=2` to `K=5` to widen the candidate pool before generation.
+3. **Parent-Child Chunking:** Re-indexed documents with 200-token child chunks mapped back to 1000-token parent paragraphs. This provided the LLM with the surrounding pricing table details when a specific term was matched.
+
+---
+
+### D. Before vs. After Telemetry Comparison
+
+#### Telemetry Data (After Fix):
+* **Retrieved Context:** 
+  * **Chunk 1 (`admission_policy.txt`):** *"...The Merit Scholarship covers 25% of tuition fees..."*
+  * **Chunk 2 (`course_catalog.txt`):** *"...The tuition fee for the Part-Time Track is $6,000, payable in installments..."*
+* **Generated Answer:** *"The tuition fee for the Part-Time Track is $6,000. The Merit Scholarship provides a 25% discount, which reduces the cost by $1,500. Therefore, the final net tuition fee is $4,500."*
+
+#### Scorecard Shifts:
+
+| Metric | Baseline Score (Before) | Optimized Score (After) | Improvement | Status |
+| :--- | :---: | :---: | :---: | :---: |
+| **Faithfulness** | 1.00 | **1.00** | 0.00 (Unchanged) | PASS |
+| **Answer Relevancy** | 0.32 | **0.95** | **+0.63** (Precision-optimized) | PASS |
+| **Context Recall** | 0.50 | **1.00** | **+0.50** (Full-retrieval hit) | PASS |
+| **Context Precision**| 0.50 | **0.90** | **+0.40** (Perfect rank sorting) | PASS |
+
